@@ -191,6 +191,9 @@ export interface DashboardStats {
   bankOpeningBalance: number;
   bankBalanceChange: number;
   bankBalanceChangePct: number;
+  bankCycleStartBalance: number;
+  bankCycleChange: number;
+  bankCycleChangePct: number;
   monthIncome: number;
   monthExpenses: number;
   monthNet: number;

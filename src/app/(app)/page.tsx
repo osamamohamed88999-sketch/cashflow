@@ -2,16 +2,21 @@ import Header from '@/components/layout/header';
 import { getDashboardStats, getCategoryBreakdown, getSmartInsights } from '@/lib/actions/dashboard';
 import { getCommitmentsWithStatus } from '@/lib/actions/commitments';
 import { getTargetsWithProgress } from '@/lib/actions/targets';
-import { formatCurrency, formatPercentage } from '@/lib/utils';
+import { formatCurrency, formatPercentage, getCycleMonth } from '@/lib/utils';
 import DashboardCharts from './dashboard-charts';
 
 export default async function DashboardPage() {
-  const stats = await getDashboardStats();
-  const insights = await getSmartInsights();
-  const commitments = await getCommitmentsWithStatus();
-  const targets = await getTargetsWithProgress();
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const expenseBreakdown = await getCategoryBreakdown(currentMonth, 'expense');
+  const currentMonth = getCycleMonth(new Date());
+
+  // Fetch all dashboard data in parallel to maximize page load speed
+  const [stats, commitments, targets, expenseBreakdown] = await Promise.all([
+    getDashboardStats(),
+    getCommitmentsWithStatus(),
+    getTargetsWithProgress(),
+    getCategoryBreakdown(currentMonth, 'expense'),
+  ]);
+
+  const insights = await getSmartInsights(stats);
 
   const statCards = [
     {
@@ -27,8 +32,8 @@ export default async function DashboardPage() {
       icon: '🏦',
       accent: 'var(--color-info)',
       bg: 'var(--color-info-muted)',
-      change: stats.bankBalanceChangePct,
-      subtitle: `بدأ بـ ${formatCurrency(stats.bankOpeningBalance)}`,
+      change: stats.bankCycleChangePct,
+      subtitle: `بدأ بـ ${formatCurrency(stats.bankCycleStartBalance)}`,
     },
     {
       label: 'دخل الشهر',
@@ -120,27 +125,27 @@ export default async function DashboardPage() {
       </div>
 
       {/* Bank Balance Detail Card */}
-      <div className="card" style={{ marginBottom: 24, borderRight: '4px solid var(--color-brand)' }}>
+      <div className="card" style={{ marginBottom: 24, borderRight: '4px solid var(--color-info)' }}>
         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: 'var(--color-text-heading)' }}>
-          🏦 تفاصيل رصيد البنك
+          🏦 تفاصيل رصيد البنك للدورة الحالية
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16 }}>
           <div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>بدأ بـ</div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>{formatCurrency(stats.bankOpeningBalance)}</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>بدأ بـ (يوم 10 في الشهر)</div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>{formatCurrency(stats.bankCycleStartBalance)}</div>
           </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>الرصيد الحالي</div>
             <div style={{ fontSize: 20, fontWeight: 700 }}>{formatCurrency(stats.personalBankBalance)}</div>
           </div>
           <div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>الفرق</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>الفرق (الدورة الحالية)</div>
             <div style={{
               fontSize: 20,
               fontWeight: 700,
-              color: stats.bankBalanceChange >= 0 ? 'var(--color-income)' : 'var(--color-expense)',
+              color: stats.bankCycleChange >= 0 ? 'var(--color-income)' : 'var(--color-expense)',
             }}>
-              {formatCurrency(stats.bankBalanceChange)}
+              {stats.bankCycleChange >= 0 ? '+' : ''}{formatCurrency(stats.bankCycleChange)}
             </div>
           </div>
           <div>
@@ -148,9 +153,88 @@ export default async function DashboardPage() {
             <div style={{
               fontSize: 20,
               fontWeight: 700,
-              color: stats.bankBalanceChangePct >= 0 ? 'var(--color-income)' : 'var(--color-expense)',
+              color: stats.bankCycleChangePct >= 0 ? 'var(--color-income)' : 'var(--color-expense)',
             }}>
-              {formatPercentage(stats.bankBalanceChangePct)}
+              {stats.bankCycleChangePct >= 0 ? '+' : ''}{formatPercentage(stats.bankCycleChangePct)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* P&L and Budget Summary Card */}
+      <div className="card" style={{ marginBottom: 24, padding: 24, borderRight: '4px solid var(--color-brand)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--color-text-heading)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>⚖️</span> ملخص الربح والخسارة للميزانية (الدورة الحالية)
+          </h3>
+          <span 
+            style={{
+              padding: '6px 14px',
+              borderRadius: '20px',
+              fontSize: '13px',
+              fontWeight: 'bold',
+              background: stats.monthNet >= 0 ? 'var(--color-income-muted)' : 'var(--color-expense-muted)',
+              color: stats.monthNet >= 0 ? 'var(--color-income)' : 'var(--color-expense)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+          >
+            {stats.monthNet >= 0 ? 'كسبان 🎉' : 'خسران ⚠️'}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 24 }}>
+          {/* Financial Health Status */}
+          <div 
+            style={{ 
+              background: 'rgba(255, 255, 255, 0.02)', 
+              borderRadius: 12, 
+              padding: 20, 
+              display: 'flex', 
+              flexDirection: 'column', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              textAlign: 'center'
+            }}
+          >
+            <span style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 8 }}>صافي ربح الدورة الحالية</span>
+            <div 
+              style={{ 
+                fontSize: 28, 
+                fontWeight: 800, 
+                color: stats.monthNet >= 0 ? 'var(--color-income)' : 'var(--color-expense)',
+                marginBottom: 6
+              }}
+            >
+              {stats.monthNet >= 0 ? '+' : ''}{formatCurrency(stats.monthNet)}
+            </div>
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+              {stats.monthNet >= 0 ? 'أداء ممتاز، الإيرادات تغطي المصروفات!' : 'تنبيه: المصروفات تجاوزت الإيرادات.'}
+            </span>
+          </div>
+
+          {/* Target & Budget List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>الدخل الشهري المرجعي</span>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>{formatCurrency(40000)}</div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>الفعلي: {formatCurrency(stats.monthIncome)}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>مرتب هدى الثابت</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-expense)' }}>{formatCurrency(5000)}</span>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: 8 }}>
+              <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>ميزانية فريلانسرز (الفعلية)</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-expense)' }}>
+                {formatCurrency(expenseBreakdown.find(c => c.name.includes('فريلانسر') || c.name.toLowerCase().includes('freelance') || c.name.includes('فري لانس'))?.amount || 0)}
+              </span>
             </div>
           </div>
         </div>

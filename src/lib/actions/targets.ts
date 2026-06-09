@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { TargetWithProgress, TargetStatus } from '@/types/database';
+import { getCycleDateRange } from '@/lib/utils';
 
 export async function getTargetsWithProgress(month?: string): Promise<TargetWithProgress[]> {
   const supabase = await createClient();
@@ -19,10 +20,7 @@ export async function getTargetsWithProgress(month?: string): Promise<TargetWith
 
   if (!targets) return [];
 
-  const monthStart = targetMonth;
-  const monthDate = new Date(targetMonth);
-  const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-  const monthEnd = nextMonth.toISOString().split('T')[0];
+  const { start: monthStart, end: monthEnd } = getCycleDateRange(targetMonth.slice(0, 7));
 
   const results: TargetWithProgress[] = [];
 

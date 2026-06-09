@@ -8,6 +8,7 @@ import { createProject, updateProject, deleteProject } from '@/lib/actions/proje
 import { toast } from 'sonner';
 import type { Project } from '@/types/database';
 import { ConfirmDelete, useConfirmDelete } from '@/components/ui/confirm-delete';
+import { formatCurrency } from '@/lib/utils';
 
 export function AddProjectButton() {
   const [showForm, setShowForm] = useState(false);
@@ -112,11 +113,11 @@ export function ProjectRow({ project }: { project: Project }) {
             {statusLabels[project.status]}
           </span>
         </td>
-        <td>{project.expected_revenue.toLocaleString('ar-EG')} ج.م</td>
-        <td style={{ color: 'var(--color-income)' }}>{project.collected_revenue.toLocaleString('ar-EG')} ج.م</td>
-        <td style={{ color: 'var(--color-expense)' }}>{project.project_expenses.toLocaleString('ar-EG')} ج.م</td>
+        <td>{formatCurrency(project.expected_revenue)}</td>
+        <td style={{ color: 'var(--color-income)' }}>{formatCurrency(project.collected_revenue)}</td>
+        <td style={{ color: 'var(--color-expense)' }}>{formatCurrency(project.project_expenses)}</td>
         <td style={{ fontWeight: 700, color: net >= 0 ? 'var(--color-income)' : 'var(--color-expense)' }}>
-          {net.toLocaleString('ar-EG')} ج.م
+          {formatCurrency(net)}
         </td>
         <td>
           <div style={{ display: 'flex', gap: 4 }}>

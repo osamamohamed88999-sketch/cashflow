@@ -2,17 +2,17 @@
  * Format number as EGP currency
  */
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('ar-EG', {
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(amount) + ' ج.م';
+  }).format(amount) + ' EGP';
 }
 
 /**
  * Format number with commas (no currency)
  */
 export function formatNumber(num: number): string {
-  return new Intl.NumberFormat('ar-EG').format(num);
+  return new Intl.NumberFormat('en-US').format(num);
 }
 
 /**
@@ -24,11 +24,11 @@ export function formatPercentage(pct: number): string {
 }
 
 /**
- * Format date to Arabic locale
+ * Format date to English locale
  */
 export function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return new Intl.DateTimeFormat('ar-EG', {
+  return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -40,35 +40,94 @@ export function formatDate(dateStr: string): string {
  */
 export function formatDateShort(dateStr: string): string {
   const date = new Date(dateStr);
-  return new Intl.DateTimeFormat('ar-EG', {
+  return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
   }).format(date);
 }
 
 /**
- * Get month name in Arabic
+ * Get month name in English
  */
 export function getMonthName(dateStr: string): string {
   const date = new Date(dateStr);
-  return new Intl.DateTimeFormat('ar-EG', { month: 'long' }).format(date);
+  return new Intl.DateTimeFormat('en-US', { month: 'long' }).format(date);
 }
 
 /**
- * Get current month start date (YYYY-MM-01)
+ * Get the cycle month string (YYYY-MM) for a given date.
+ * Cycle resets on the 10th starting July 2026.
+ */
+export function getCycleMonth(date: Date): string {
+  const year = date.getFullYear();
+  const month = date.getMonth(); // 0-indexed
+  const day = date.getDate();
+
+  const threshold = new Date(2026, 6, 10); // July 10, 2026
+
+  if (date >= threshold) {
+    if (day >= 10) {
+      return `${year}-${String(month + 1).padStart(2, '0')}`;
+    } else {
+      const prev = new Date(year, month - 1, 1);
+      return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+    }
+  } else {
+    // Before July 10, 2026
+    if (year === 2026) {
+      if (month === 5) {
+        return '2026-06';
+      } else if (month === 6 && day < 10) {
+        return '2026-06';
+      }
+    }
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+  }
+}
+
+/**
+ * Get date range (start inclusive, end exclusive) for a cycle month string.
+ */
+export function getCycleDateRange(monthStr: string): { start: string; end: string } {
+  const [yearStr, monthNumStr] = monthStr.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthNumStr, 10) - 1; // 0-indexed
+
+  const isJuly2026OrLater = year > 2026 || (year === 2026 && month >= 6);
+
+  if (isJuly2026OrLater) {
+    const startStr = `${year}-${String(month + 1).padStart(2, '0')}-10`;
+    const nextDate = new Date(year, month + 1, 10);
+    const endStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-10`;
+    return { start: startStr, end: endStr };
+  } else if (year === 2026 && month === 5) {
+    // June 2026 Transition month (June 1st to July 9th inclusive)
+    return { start: '2026-06-01', end: '2026-07-10' };
+  } else {
+    const startStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const nextDate = new Date(year, month + 1, 1);
+    const endStr = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-01`;
+    return { start: startStr, end: endStr };
+  }
+}
+
+/**
+ * Get current month start date
  */
 export function getCurrentMonthStart(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const currentCycle = getCycleMonth(new Date());
+  return getCycleDateRange(currentCycle).start;
 }
 
 /**
  * Get current month end date
  */
 export function getCurrentMonthEnd(): string {
-  const now = new Date();
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
+  const currentCycle = getCycleMonth(new Date());
+  const range = getCycleDateRange(currentCycle);
+  const endDate = new Date(range.end);
+  endDate.setDate(endDate.getDate() - 1);
+  return `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
 }
 
 /**

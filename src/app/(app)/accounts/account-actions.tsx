@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { accountSchema, type AccountFormData } from '@/lib/validations/schemas';
 import { createAccount, updateAccount, deleteAccount } from '@/lib/actions/accounts';
 import { toast } from 'sonner';
-import { accountTypeLabels } from '@/lib/utils';
+import { accountTypeLabels, formatCurrency } from '@/lib/utils';
 import type { AccountWithBalance } from '@/types/database';
 import { ConfirmDelete, useConfirmDelete } from '@/components/ui/confirm-delete';
 
@@ -74,6 +74,7 @@ export function AccountCard({ account }: { account: AccountWithBalance }) {
       await updateAccount(account.id, {
         name: data.name,
         type: data.type,
+        opening_balance: Number(data.opening_balance),
         notes: data.notes,
       });
       toast.success('تم تحديث الحساب ✅');
@@ -116,19 +117,19 @@ export function AccountCard({ account }: { account: AccountWithBalance }) {
         </div>
 
         <div className="stat-card-value">
-          {account.current_balance.toLocaleString('ar-EG', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ج.م
+          {formatCurrency(account.current_balance)}
         </div>
 
         <div style={{ display: 'flex', gap: 12, marginTop: 12, fontSize: 12 }}>
           <div>
             <span style={{ color: 'var(--color-text-muted)' }}>الافتتاحي: </span>
-            <span>{account.opening_balance.toLocaleString('ar-EG')} ج.م</span>
+            <span>{formatCurrency(account.opening_balance)}</span>
           </div>
         </div>
 
         {account.balance_change !== 0 && (
           <span className={`stat-card-change ${account.balance_change >= 0 ? 'positive' : 'negative'}`}>
-            {account.balance_change >= 0 ? '+' : ''}{account.balance_change_pct.toFixed(1)}% ({account.balance_change.toLocaleString('ar-EG')} ج.م)
+            {account.balance_change >= 0 ? '+' : ''}{account.balance_change_pct.toFixed(1)}% ({formatCurrency(account.balance_change)})
           </span>
         )}
 
@@ -147,7 +148,7 @@ export function AccountCard({ account }: { account: AccountWithBalance }) {
           register={register}
           errors={errors}
           loading={loading}
-          showBalance={false}
+          showBalance={true}
         />
       )}
 

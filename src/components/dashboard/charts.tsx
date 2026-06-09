@@ -58,7 +58,7 @@ export function CategoryDonut({ data }: { data: { name: string; amount: number }
             fontFamily: 'Cairo',
             direction: 'rtl',
           }}
-          formatter={(value) => `${Number(value).toLocaleString('ar-EG')} ج.م`}
+          formatter={(value) => `${Number(value).toLocaleString('en-US')} EGP`}
         />
         <Legend
           wrapperStyle={{ fontFamily: 'Cairo', fontSize: 12, direction: 'rtl' }}
@@ -84,7 +84,7 @@ export function CashflowLine({ data }: { data: { date: string; income: number; e
             fontFamily: 'Cairo',
             direction: 'rtl',
           }}
-          formatter={(value) => `${Number(value).toLocaleString('ar-EG')} ج.م`}
+          formatter={(value) => `${Number(value).toLocaleString('en-US')} EGP`}
         />
         <Line type="monotone" dataKey="income" name="الدخل" stroke="#10b981" strokeWidth={2} dot={false} />
         <Line type="monotone" dataKey="expenses" name="المصروفات" stroke="#ef4444" strokeWidth={2} dot={false} />

@@ -17,23 +17,23 @@ export async function getAccounts(): Promise<AccountWithBalance[]> {
 
   if (!accounts) return [];
 
-  // Calculate current balance for each account
-  const results: AccountWithBalance[] = [];
+  // Calculate current balance for each account in parallel
+  const results = await Promise.all(
+    accounts.map(async (account) => {
+      const balance = await calculateAccountBalance(account.id, account.opening_balance);
+      const change = balance - account.opening_balance;
+      const changePct = account.opening_balance > 0
+        ? ((balance - account.opening_balance) / account.opening_balance) * 100
+        : 0;
 
-  for (const account of accounts) {
-    const balance = await calculateAccountBalance(account.id, account.opening_balance);
-    const change = balance - account.opening_balance;
-    const changePct = account.opening_balance > 0
-      ? ((balance - account.opening_balance) / account.opening_balance) * 100
-      : 0;
-
-    results.push({
-      ...account,
-      current_balance: balance,
-      balance_change: change,
-      balance_change_pct: changePct,
-    });
-  }
+      return {
+        ...account,
+        current_balance: balance,
+        balance_change: change,
+        balance_change_pct: changePct,
+      };
+    })
+  );
 
   return results;
 }
@@ -41,58 +41,54 @@ export async function getAccounts(): Promise<AccountWithBalance[]> {
 export async function calculateAccountBalance(accountId: string, openingBalance: number): Promise<number> {
   const supabase = await createClient();
 
-  // Income to this account (paid only)
-  const { data: incomes } = await supabase
-    .from('transactions')
-    .select('amount, paid_amount, status')
-    .eq('account_id', accountId)
-    .eq('type', 'income')
-    .in('status', ['paid', 'partial']);
+  // Fetch all transaction aggregates in parallel to optimize speed
+  const [incomesRes, expensesRes, transfersOutRes, transfersInRes, adjustmentsRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('amount, paid_amount, status')
+      .eq('account_id', accountId)
+      .eq('type', 'income')
+      .in('status', ['paid', 'partial']),
+    supabase
+      .from('transactions')
+      .select('amount, paid_amount, status')
+      .eq('account_id', accountId)
+      .eq('type', 'expense')
+      .in('status', ['paid', 'partial']),
+    supabase
+      .from('transactions')
+      .select('amount, paid_amount, status')
+      .eq('account_id', accountId)
+      .eq('type', 'transfer')
+      .in('status', ['paid', 'partial']),
+    supabase
+      .from('transactions')
+      .select('amount, paid_amount, status')
+      .eq('destination_account_id', accountId)
+      .eq('type', 'transfer')
+      .in('status', ['paid', 'partial']),
+    supabase
+      .from('transactions')
+      .select('amount, paid_amount, status')
+      .eq('account_id', accountId)
+      .eq('type', 'adjustment')
+      .in('status', ['paid', 'partial']),
+  ]);
 
-  // Expenses from this account (paid only)
-  const { data: expenses } = await supabase
-    .from('transactions')
-    .select('amount, paid_amount, status')
-    .eq('account_id', accountId)
-    .eq('type', 'expense')
-    .in('status', ['paid', 'partial']);
-
-  // Transfers OUT from this account
-  const { data: transfersOut } = await supabase
-    .from('transactions')
-    .select('amount, paid_amount, status')
-    .eq('account_id', accountId)
-    .eq('type', 'transfer')
-    .in('status', ['paid', 'partial']);
-
-  // Transfers IN to this account
-  const { data: transfersIn } = await supabase
-    .from('transactions')
-    .select('amount, paid_amount, status')
-    .eq('destination_account_id', accountId)
-    .eq('type', 'transfer')
-    .in('status', ['paid', 'partial']);
-
-  // Adjustments on this account
-  const { data: adjustments } = await supabase
-    .from('transactions')
-    .select('amount, paid_amount, status')
-    .eq('account_id', accountId)
-    .eq('type', 'adjustment')
-    .in('status', ['paid', 'partial']);
+  const incomes = incomesRes.data || [];
+  const expenses = expensesRes.data || [];
+  const transfersOut = transfersOutRes.data || [];
+  const transfersIn = transfersInRes.data || [];
+  const adjustments = adjustmentsRes.data || [];
 
   const getEffective = (tx: { amount: number; paid_amount: number | null; status: string }) =>
     tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount;
 
-  const totalIncome = (incomes || []).reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalExpense = (expenses || []).reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalTransferOut = (transfersOut || []).reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalTransferIn = (transfersIn || []).reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalAdjustment = (adjustments || []).reduce((sum, tx) => {
-    const amt = getEffective(tx);
-    // Positive adjustment = increase, negative = decrease
-    return sum + amt;
-  }, 0);
+  const totalIncome = incomes.reduce((sum, tx) => sum + getEffective(tx), 0);
+  const totalExpense = expenses.reduce((sum, tx) => sum + getEffective(tx), 0);
+  const totalTransferOut = transfersOut.reduce((sum, tx) => sum + getEffective(tx), 0);
+  const totalTransferIn = transfersIn.reduce((sum, tx) => sum + getEffective(tx), 0);
+  const totalAdjustment = adjustments.reduce((sum, tx) => sum + getEffective(tx), 0);
 
   return openingBalance + totalIncome - totalExpense - totalTransferOut + totalTransferIn + totalAdjustment;
 }
@@ -123,18 +119,25 @@ export async function createAccount(data: {
 export async function updateAccount(id: string, data: {
   name: string;
   type: string;
+  opening_balance?: number;
   notes?: string;
 }) {
   const supabase = await createClient();
 
+  const updateData: any = {
+    name: data.name,
+    type: data.type,
+    notes: data.notes || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (typeof data.opening_balance === 'number') {
+    updateData.opening_balance = data.opening_balance;
+  }
+
   const { error } = await supabase
     .from('accounts')
-    .update({
-      name: data.name,
-      type: data.type,
-      notes: data.notes || null,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', id);
 
   if (error) throw new Error(error.message);

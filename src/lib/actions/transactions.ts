@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import type { TransactionWithRelations } from '@/types/database';
+import { getCycleDateRange } from '@/lib/utils';
 
 export async function getTransactions(filters?: {
   month?: string;
@@ -30,10 +31,7 @@ export async function getTransactions(filters?: {
     .order('created_at', { ascending: false });
 
   if (filters?.month) {
-    const monthStart = `${filters.month}-01`;
-    const monthDate = new Date(filters.month + '-01');
-    const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-    const monthEnd = nextMonth.toISOString().split('T')[0];
+    const { start: monthStart, end: monthEnd } = getCycleDateRange(filters.month);
     query = query.gte('date', monthStart).lt('date', monthEnd);
   }
 
@@ -162,10 +160,7 @@ export async function getMonthlyTotals(month: string, bucket?: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { income: 0, expenses: 0, net: 0 };
 
-  const monthStart = `${month}-01`;
-  const monthDate = new Date(month + '-01');
-  const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-  const monthEnd = nextMonth.toISOString().split('T')[0];
+  const { start: monthStart, end: monthEnd } = getCycleDateRange(month);
 
   let query = supabase
     .from('transactions')

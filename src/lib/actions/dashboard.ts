@@ -5,16 +5,22 @@ import type { DashboardStats, CategoryBreakdown, SmartInsight } from '@/types/da
 import { getAccounts } from './accounts';
 import { getMonthlyTotals } from './transactions';
 import { getCommitmentsWithStatus } from './commitments';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, getCycleDateRange, getCycleMonth } from '@/lib/utils';
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const accounts = await getAccounts();
   const currentMonth = new Date().toISOString().slice(0, 7);
+  const lastMonth = new Date();
+  lastMonth.setMonth(lastMonth.getMonth() - 1);
+  const lastMonthStr = lastMonth.toISOString().slice(0, 7);
 
-  const allTotals = await getMonthlyTotals(currentMonth);
-  const personalTotals = await getMonthlyTotals(currentMonth, 'personal');
-  const digiWhaleTotals = await getMonthlyTotals(currentMonth, 'digi_whale');
-  const commitments = await getCommitmentsWithStatus();
+  const [accounts, allTotals, , digiWhaleTotals, commitments, lastMonthTotals] = await Promise.all([
+    getAccounts(),
+    getMonthlyTotals(currentMonth),
+    getMonthlyTotals(currentMonth, 'personal'),
+    getMonthlyTotals(currentMonth, 'digi_whale'),
+    getCommitmentsWithStatus(),
+    getMonthlyTotals(lastMonthStr),
+  ]);
 
   const totalBalance = accounts.reduce((sum, acc) => sum + acc.current_balance, 0);
 
@@ -26,15 +32,48 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ? ((personalBankBalance - bankOpeningBalance) / bankOpeningBalance) * 100
     : 0;
 
+  // Calculate dynamic cycle-based balance updates for bank account
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const currentCycle = getCycleMonth(new Date());
+  const { start: cycleStart } = getCycleDateRange(currentCycle);
+
+  let bankNetChange = 0;
+  if (bankAccount && user) {
+    const { data: cycleTxns } = await supabase
+      .from('transactions')
+      .select('type, amount, paid_amount, status, account_id, destination_account_id')
+      .eq('user_id', user.id)
+      .gte('date', cycleStart)
+      .in('status', ['paid', 'partial']);
+
+    if (cycleTxns) {
+      cycleTxns.forEach((tx) => {
+        const effective = tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount;
+        if (tx.account_id === bankAccount.id) {
+          if (tx.type === 'income') bankNetChange += effective;
+          if (tx.type === 'expense') bankNetChange -= effective;
+          if (tx.type === 'transfer') bankNetChange -= effective;
+          if (tx.type === 'adjustment') bankNetChange += effective;
+        }
+        if (tx.destination_account_id === bankAccount.id && tx.type === 'transfer') {
+          bankNetChange += effective;
+        }
+      });
+    }
+  }
+
+  const bankCycleStartBalance = personalBankBalance - bankNetChange;
+  const bankCycleChange = bankNetChange;
+  const bankCycleChangePct = bankCycleStartBalance > 0
+    ? (bankCycleChange / bankCycleStartBalance) * 100
+    : 0;
+
   const remainingCommitments = commitments
     .filter((c) => c.status !== 'paid')
     .reduce((sum, c) => sum + c.remaining, 0);
 
   // Calculate spending change vs last month
-  const lastMonth = new Date();
-  lastMonth.setMonth(lastMonth.getMonth() - 1);
-  const lastMonthStr = lastMonth.toISOString().slice(0, 7);
-  const lastMonthTotals = await getMonthlyTotals(lastMonthStr);
   const spendingChangePct = lastMonthTotals.expenses > 0
     ? ((allTotals.expenses - lastMonthTotals.expenses) / lastMonthTotals.expenses) * 100
     : 0;
@@ -45,6 +84,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     bankOpeningBalance,
     bankBalanceChange,
     bankBalanceChangePct,
+    bankCycleStartBalance,
+    bankCycleChange,
+    bankCycleChangePct,
     monthIncome: allTotals.income,
     monthExpenses: allTotals.expenses,
     monthNet: allTotals.net,
@@ -61,10 +103,7 @@ export async function getCategoryBreakdown(month: string, type: 'expense' | 'inc
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const monthStart = `${month}-01`;
-  const monthDate = new Date(month + '-01');
-  const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-  const monthEnd = nextMonth.toISOString().split('T')[0];
+  const { start: monthStart, end: monthEnd } = getCycleDateRange(month);
 
   let query = supabase
     .from('transactions')
@@ -103,8 +142,8 @@ export async function getCategoryBreakdown(month: string, type: 'expense' | 'inc
   }));
 }
 
-export async function getSmartInsights(): Promise<SmartInsight[]> {
-  const stats = await getDashboardStats();
+export async function getSmartInsights(providedStats?: DashboardStats): Promise<SmartInsight[]> {
+  const stats = providedStats || await getDashboardStats();
   const commitments = await getCommitmentsWithStatus();
   const insights: SmartInsight[] = [];
 
