@@ -202,6 +202,11 @@ export interface DashboardStats {
   digiWhaleNet: number;
   remainingCommitments: number;
   spendingChangePct: number;
+  commitmentsTotal: number;
+  commitmentsDeducted: number;
+  netProfitAfterDeductions: number;
+  deductionsApplied: boolean;
+  smartOpinion: string;
 }
 
 export interface CategoryBreakdown {

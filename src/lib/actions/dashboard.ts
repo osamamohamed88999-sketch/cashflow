@@ -78,6 +78,21 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ? ((allTotals.expenses - lastMonthTotals.expenses) / lastMonthTotals.expenses) * 100
     : 0;
 
+  const commitmentsTotal = commitments.reduce((sum, c) => sum + c.amount, 0);
+  const currentDay = new Date().getDate();
+  const deductionsApplied = currentDay >= 5;
+  const commitmentsDeducted = deductionsApplied ? commitmentsTotal : 0;
+  const netProfitAfterDeductions = allTotals.income - commitmentsTotal;
+
+  let smartOpinion = '';
+  if (netProfitAfterDeductions > 0) {
+    smartOpinion = `وضعك المالي تمام ومستقر الشهر ده يا صاحبي! دخلك مغطي كل الالتزامات ومتبقي معاك صافي ربح قدره ${formatCurrency(netProfitAfterDeductions)} بعد كل الاستقطاعات. عاش يا بطل! 🎉`;
+  } else if (netProfitAfterDeductions === 0) {
+    smartOpinion = `دخلك مساوي بالظبط لالتزاماتك الشهر ده يا صاحبي. يعني وضعك على القد بالظبط، حاول تزود دخلك شوية من Digi Whale عشان تعمل قرشين على جنب. ⚖️`;
+  } else {
+    smartOpinion = `خلي بالك يا صاحبي! التزاماتك الشهر ده أعلى من دخلك بـ ${formatCurrency(Math.abs(netProfitAfterDeductions))}. محتاج تركز على زيادة دخلك أو تقلل الالتزامات شوية عشان متزنقش نفسك. ⚠️`;
+  }
+
   return {
     totalBalance,
     personalBankBalance,
@@ -95,6 +110,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     digiWhaleNet: digiWhaleTotals.net,
     remainingCommitments,
     spendingChangePct,
+    commitmentsTotal,
+    commitmentsDeducted,
+    netProfitAfterDeductions,
+    deductionsApplied,
+    smartOpinion,
   };
 }
 

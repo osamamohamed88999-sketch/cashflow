@@ -152,3 +152,34 @@ export async function deleteAccount(id: string) {
   revalidatePath('/accounts');
   revalidatePath('/');
 }
+
+export async function updateBankBalance(newBalance: number) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('غير مسجل دخول');
+
+  const { data: accounts } = await supabase
+    .from('accounts')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('type', 'bank')
+    .limit(1);
+
+  const bankAccount = accounts?.[0];
+  if (!bankAccount) throw new Error('لم يتم العثور على حساب البنك');
+
+  // Calculate computed balance from transactions (without opening balance)
+  const currentComputed = await calculateAccountBalance(bankAccount.id, 0);
+
+  // Set opening balance so that current_balance matches newBalance
+  const newOpeningBalance = newBalance - currentComputed;
+
+  const { error } = await supabase
+    .from('accounts')
+    .update({ opening_balance: newOpeningBalance, updated_at: new Date().toISOString() })
+    .eq('id', bankAccount.id);
+
+  if (error) throw new Error(error.message);
+  revalidatePath('/accounts');
+  revalidatePath('/');
+}

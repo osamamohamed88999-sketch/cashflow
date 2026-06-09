@@ -24,7 +24,6 @@ const financeNav: NavItem[] = [
 
 const businessNav: NavItem[] = [
   { href: '/digi-whale', label: 'Digi Whale', icon: '🐋' },
-  { href: '/projects', label: 'المشاريع', icon: '📁' },
   { href: '/people', label: 'الأشخاص', icon: '👥' },
 ];
 
