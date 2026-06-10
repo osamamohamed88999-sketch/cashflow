@@ -2,9 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import type { Account, AccountWithBalance } from '@/types/database';
+import type { AccountWithBalance } from '@/types/database';
 
-export async function getAccounts(): Promise<AccountWithBalance[]> {
+export async function getAccounts(_simDateStr?: string): Promise<AccountWithBalance[]> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
@@ -75,22 +75,13 @@ export async function calculateAccountBalance(accountId: string, openingBalance:
       .in('status', ['paid', 'partial']),
   ]);
 
-  const incomes = incomesRes.data || [];
-  const expenses = expensesRes.data || [];
-  const transfersOut = transfersOutRes.data || [];
-  const transfersIn = transfersInRes.data || [];
-  const adjustments = adjustmentsRes.data || [];
+  const totalIncomes = (incomesRes.data || []).reduce((sum, tx) => sum + (tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount), 0);
+  const totalExpenses = (expensesRes.data || []).reduce((sum, tx) => sum + (tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount), 0);
+  const totalTransfersOut = (transfersOutRes.data || []).reduce((sum, tx) => sum + (tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount), 0);
+  const totalTransfersIn = (transfersInRes.data || []).reduce((sum, tx) => sum + (tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount), 0);
+  const totalAdjustments = (adjustmentsRes.data || []).reduce((sum, tx) => sum + (tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount), 0);
 
-  const getEffective = (tx: { amount: number; paid_amount: number | null; status: string }) =>
-    tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount;
-
-  const totalIncome = incomes.reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalExpense = expenses.reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalTransferOut = transfersOut.reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalTransferIn = transfersIn.reduce((sum, tx) => sum + getEffective(tx), 0);
-  const totalAdjustment = adjustments.reduce((sum, tx) => sum + getEffective(tx), 0);
-
-  return openingBalance + totalIncome - totalExpense - totalTransferOut + totalTransferIn + totalAdjustment;
+  return openingBalance + totalIncomes - totalExpenses - totalTransfersOut + totalTransfersIn + totalAdjustments;
 }
 
 export async function createAccount(data: {
@@ -171,7 +162,9 @@ export async function updateBankBalance(newBalance: number) {
   // Calculate computed balance from transactions (without opening balance)
   const currentComputed = await calculateAccountBalance(bankAccount.id, 0);
 
-  // Set opening balance so that current_balance matches newBalance
+  // Set opening balance so that:
+  // newBalance = newOpeningBalance + currentComputed
+  // newOpeningBalance = newBalance - currentComputed
   const newOpeningBalance = newBalance - currentComputed;
 
   const { error } = await supabase
@@ -182,4 +175,38 @@ export async function updateBankBalance(newBalance: number) {
   if (error) throw new Error(error.message);
   revalidatePath('/accounts');
   revalidatePath('/');
+}
+
+export async function resetAllData() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('غير مسجل دخول');
+
+  // Delete all user records from relevant tables
+  await Promise.all([
+    supabase.from('transactions').delete().eq('user_id', user.id),
+    supabase.from('monthly_commitments').delete().eq('user_id', user.id),
+    supabase.from('projects').delete().eq('user_id', user.id),
+    supabase.from('monthly_targets').delete().eq('user_id', user.id),
+    supabase.from('people').delete().eq('user_id', user.id),
+    supabase.from('accounts').delete().eq('user_id', user.id),
+  ]);
+
+  // Create default bank account with 0 balance
+  const { error: accErr } = await supabase.from('accounts').insert({
+    user_id: user.id,
+    name: 'حساب البنك الرئيسي',
+    type: 'bank',
+    opening_balance: 0,
+    currency: 'EGP',
+    notes: 'الحساب الرئيسي للعمليات والالتزامات',
+  });
+
+  if (accErr) throw new Error(accErr.message);
+
+  revalidatePath('/');
+  revalidatePath('/accounts');
+  revalidatePath('/transactions');
+  revalidatePath('/commitments');
+  revalidatePath('/digi-whale');
 }

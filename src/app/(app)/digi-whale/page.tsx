@@ -4,6 +4,7 @@ import { getProjects } from '@/lib/actions/projects';
 import { getPeople } from '@/lib/actions/people';
 import { formatCurrency } from '@/lib/utils';
 import Link from 'next/link';
+import AddProjectModal from './add-project-modal';
 
 export default async function DigiWhalePage() {
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -46,10 +47,10 @@ export default async function DigiWhalePage() {
       </div>
 
       {/* Quick Links */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
         <Link href="/projects" className="btn btn-secondary">📁 المشاريع ({projects.length})</Link>
         <Link href="/people" className="btn btn-secondary">👥 الفريق ({people.length})</Link>
-        <Link href="/transactions/add" className="btn btn-primary">➕ إضافة معاملة</Link>
+        <AddProjectModal />
       </div>
 
       {/* Active Projects */}

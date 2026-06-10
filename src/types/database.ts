@@ -203,10 +203,14 @@ export interface DashboardStats {
   remainingCommitments: number;
   spendingChangePct: number;
   commitmentsTotal: number;
+  futureCommitmentsTotal: number;
   commitmentsDeducted: number;
   netProfitAfterDeductions: number;
   deductionsApplied: boolean;
   smartOpinion: string;
+  todayIncome?: number;
+  todayExpenses?: number;
+  todayNet?: number;
 }
 
 export interface CategoryBreakdown {

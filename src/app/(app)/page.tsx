@@ -11,8 +11,13 @@ const monthNamesArabic = [
   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
 ];
 
-export default async function DashboardPage() {
-  const currentDate = new Date();
+export default async function DashboardPage(props: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const searchParams = await props.searchParams;
+  const simDateStr = typeof searchParams.sim_date === 'string' ? searchParams.sim_date : undefined;
+
+  const currentDate = simDateStr ? new Date(simDateStr) : new Date();
   const currentMonthStr = getCycleMonth(currentDate);
   
   // Extract month index for Arabic naming (e.g. "2026-06" -> June)
@@ -22,8 +27,8 @@ export default async function DashboardPage() {
 
   // Parallel data fetching for performance
   const [stats, commitments] = await Promise.all([
-    getDashboardStats(),
-    getCommitmentsWithStatus(),
+    getDashboardStats(simDateStr),
+    getCommitmentsWithStatus(simDateStr),
   ]);
 
   return (
@@ -33,6 +38,7 @@ export default async function DashboardPage() {
         stats={stats} 
         commitments={commitments} 
         currentMonthName={currentMonthName} 
+        simDate={simDateStr}
       />
     </>
   );

@@ -7,18 +7,22 @@ import { getMonthlyTotals } from './transactions';
 import { getCommitmentsWithStatus } from './commitments';
 import { formatCurrency, getCycleDateRange, getCycleMonth } from '@/lib/utils';
 
-export async function getDashboardStats(): Promise<DashboardStats> {
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const lastMonth = new Date();
+export async function getDashboardStats(simDateStr?: string): Promise<DashboardStats> {
+  const today = simDateStr ? new Date(simDateStr) : new Date();
+  const currentMonth = getCycleMonth(today);
+  const lastMonth = new Date(today);
   lastMonth.setMonth(lastMonth.getMonth() - 1);
-  const lastMonthStr = lastMonth.toISOString().slice(0, 7);
+  const lastMonthStr = getCycleMonth(lastMonth);
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const [accounts, allTotals, , digiWhaleTotals, commitments, lastMonthTotals] = await Promise.all([
-    getAccounts(),
+    getAccounts(simDateStr),
     getMonthlyTotals(currentMonth),
     getMonthlyTotals(currentMonth, 'personal'),
     getMonthlyTotals(currentMonth, 'digi_whale'),
-    getCommitmentsWithStatus(),
+    getCommitmentsWithStatus(simDateStr),
     getMonthlyTotals(lastMonthStr),
   ]);
 
@@ -33,9 +37,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     : 0;
 
   // Calculate dynamic cycle-based balance updates for bank account
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const currentCycle = getCycleMonth(new Date());
+  const currentCycle = getCycleMonth(today);
   const { start: cycleStart } = getCycleDateRange(currentCycle);
 
   let bankNetChange = 0;
@@ -78,19 +80,48 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ? ((allTotals.expenses - lastMonthTotals.expenses) / lastMonthTotals.expenses) * 100
     : 0;
 
-  const commitmentsTotal = commitments.reduce((sum, c) => sum + c.amount, 0);
-  const currentDay = new Date().getDate();
-  const deductionsApplied = currentDay >= 5;
-  const commitmentsDeducted = deductionsApplied ? commitmentsTotal : 0;
-  const netProfitAfterDeductions = allTotals.income - commitmentsTotal;
+  const cycleStartDate = new Date(cycleStart);
+  const commitmentsTotal = commitments
+    .filter((c) => new Date(c.created_at).getTime() <= cycleStartDate.getTime())
+    .reduce((sum, c) => sum + c.amount, 0);
+
+  const futureCommitmentsTotal = commitments
+    .filter((c) => new Date(c.created_at).getTime() > cycleStartDate.getTime())
+    .reduce((sum, c) => sum + c.amount, 0);
+
+  // Manual commitments: we do not automatically deduct anything.
+  const commitmentsDeducted = 0;
+  const deductionsApplied = false;
+  const netProfitAfterDeductions = allTotals.income - remainingCommitments;
+
+  // Calculate stats for the active day
+  const dateStr = today.toISOString().split('T')[0];
+  let todayIncome = 0;
+  let todayExpenses = 0;
+  if (user) {
+    const { data: todayTxns } = await supabase
+      .from('transactions')
+      .select('type, amount, paid_amount, status')
+      .eq('user_id', user.id)
+      .eq('date', dateStr)
+      .in('status', ['paid', 'partial']);
+
+    if (todayTxns) {
+      todayTxns.forEach((tx) => {
+        const effective = tx.status === 'partial' ? (tx.paid_amount ?? 0) : tx.amount;
+        if (tx.type === 'income') todayIncome += effective;
+        if (tx.type === 'expense') todayExpenses += effective;
+      });
+    }
+  }
 
   let smartOpinion = '';
   if (netProfitAfterDeductions > 0) {
-    smartOpinion = `وضعك المالي تمام ومستقر الشهر ده يا صاحبي! دخلك مغطي كل الالتزامات ومتبقي معاك صافي ربح قدره ${formatCurrency(netProfitAfterDeductions)} بعد كل الاستقطاعات. عاش يا بطل! 🎉`;
+    smartOpinion = `وضعك المالي مستقر تماماً يا صاحبي! دخلك الحالي مغطي التزاماتك ومتبقي لك ربح صافي قدره ${formatCurrency(netProfitAfterDeductions)} بعد خصم الالتزامات المتبقية. 🚀`;
   } else if (netProfitAfterDeductions === 0) {
-    smartOpinion = `دخلك مساوي بالظبط لالتزاماتك الشهر ده يا صاحبي. يعني وضعك على القد بالظبط، حاول تزود دخلك شوية من Digi Whale عشان تعمل قرشين على جنب. ⚖️`;
+    smartOpinion = `دخلك الحالي مساوي بالظبط لالتزاماتك المتبقية هذا الشهر. حاول تركز على إدخال مشاريع جديدة في Digi Whale لزيادة أرباحك. ⚖️`;
   } else {
-    smartOpinion = `خلي بالك يا صاحبي! التزاماتك الشهر ده أعلى من دخلك بـ ${formatCurrency(Math.abs(netProfitAfterDeductions))}. محتاج تركز على زيادة دخلك أو تقلل الالتزامات شوية عشان متزنقش نفسك. ⚠️`;
+    smartOpinion = `خلي بالك يا صاحبي! التزاماتك المتبقية هذا الشهر أعلى من دخلك بـ ${formatCurrency(Math.abs(netProfitAfterDeductions))}. محتاج تضيف دخل جديد لتغطيتها. ⚠️`;
   }
 
   return {
@@ -111,10 +142,14 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     remainingCommitments,
     spendingChangePct,
     commitmentsTotal,
+    futureCommitmentsTotal,
     commitmentsDeducted,
     netProfitAfterDeductions,
     deductionsApplied,
     smartOpinion,
+    todayIncome,
+    todayExpenses,
+    todayNet: todayIncome - todayExpenses,
   };
 }
 

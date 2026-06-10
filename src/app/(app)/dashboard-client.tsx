@@ -3,17 +3,18 @@
 import React, { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
-import { updateBankBalance } from '@/lib/actions/accounts';
-import { createCommitment, deleteCommitment } from '@/lib/actions/commitments';
+import { updateBankBalance, resetAllData } from '@/lib/actions/accounts';
+import { createCommitment, deleteCommitment, payCommitment, unpayCommitment } from '@/lib/actions/commitments';
 import type { DashboardStats, CommitmentWithStatus } from '@/types/database';
 
 interface DashboardClientProps {
   stats: DashboardStats;
   commitments: CommitmentWithStatus[];
   currentMonthName: string;
+  simDate?: string;
 }
 
-export default function DashboardClient({ stats, commitments, currentMonthName }: DashboardClientProps) {
+export default function DashboardClient({ stats, commitments, currentMonthName, simDate }: DashboardClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -22,10 +23,37 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
   const [newBalance, setNewBalance] = useState(stats.personalBankBalance.toString());
   const [balanceError, setBalanceError] = useState('');
 
+  // Simulation picker input state
+  const [simDateInput, setSimDateInput] = useState(simDate || '');
+
   // New commitment state
   const [cName, setCName] = useState('');
   const [cAmount, setCAmount] = useState('');
   const [cError, setCError] = useState('');
+
+  // Helper to format Date objects as YYYY-MM-DD
+  const formatDateString = (d: Date) => {
+    return d.toISOString().split('T')[0];
+  };
+
+  const currentActiveDate = simDate ? new Date(simDate) : new Date();
+
+  // Previous date
+  const prevDate = new Date(currentActiveDate);
+  prevDate.setDate(prevDate.getDate() - 1);
+  const prevDateStr = formatDateString(prevDate);
+
+  // Next date
+  const nextDate = new Date(currentActiveDate);
+  nextDate.setDate(nextDate.getDate() + 1);
+  const nextDateStr = formatDateString(nextDate);
+
+  const navigateToDate = (dateStr: string) => {
+    startTransition(() => {
+      setSimDateInput(dateStr);
+      router.push(`/?sim_date=${dateStr}`);
+    });
+  };
 
   const handleUpdateBalance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,9 +121,46 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
     });
   };
 
+  const handlePayCommitment = (commitmentId: string) => {
+    startTransition(async () => {
+      try {
+        await payCommitment(commitmentId, simDate);
+        router.refresh();
+      } catch (err: any) {
+        alert(err.message || 'حدث خطأ أثناء دفع الالتزام');
+      }
+    });
+  };
+
+  const handleUnpayCommitment = (commitmentId: string) => {
+    startTransition(async () => {
+      try {
+        await unpayCommitment(commitmentId, simDate);
+        router.refresh();
+      } catch (err: any) {
+        alert(err.message || 'حدث خطأ أثناء إلغاء الدفع');
+      }
+    });
+  };
+
+  const handleResetAllData = () => {
+    if (!confirm('🚨 تحذير هام! هل أنت متأكد من رغبتك في تصفير كل البيانات والمعاملات بالكامل؟ هذا الإجراء سيحذف كل شيء وسيبدأ من الصفر ولا يمكن التراجع عنه!')) return;
+
+    startTransition(async () => {
+      try {
+        await resetAllData();
+        setSimDateInput('');
+        router.push('/');
+        router.refresh();
+      } catch (err: any) {
+        alert(err.message || 'حدث خطأ أثناء تصفير البيانات');
+      }
+    });
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, direction: 'rtl' }}>
-      
+
       {/* 1. Main Dashboard Header */}
       <div 
         style={{
@@ -103,7 +168,7 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: 12,
+          gap: 16,
           padding: '16px 20px',
           background: 'rgba(26, 31, 53, 0.5)',
           backdropFilter: 'blur(10px)',
@@ -115,31 +180,104 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
           <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--color-text-heading)', margin: 0 }}>
             لوحة كاش فلو الحساب المالي 🐋
           </h2>
-          <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-            دورة شهر {currentMonthName} (بدأت في 5 من الشهر الحالي)
+          <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 4, margin: 0 }}>
+            دورة شهر {currentMonthName} (تاريخ الدورة النشط)
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <span 
-            className="badge" 
-            style={{ 
-              background: stats.deductionsApplied ? 'var(--color-income-muted)' : 'var(--color-warning-muted)', 
-              color: stats.deductionsApplied ? 'var(--color-income)' : 'var(--color-warning)',
-              fontSize: 13,
-              fontWeight: 700,
-              padding: '6px 12px'
-            }}
+
+        {/* Date simulation controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button 
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigateToDate(prevDateStr)}
+            style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', color: '#ffffff', border: '1px solid rgba(255,255,255,0.1)' }}
           >
-            {stats.deductionsApplied ? 'تم خصم الالتزامات تلقائياً (يوم 5) ✅' : 'الالتزامات معلقة حتى يوم 5 ف الشهر ⏳'}
-          </span>
+            ⬅️ السابق
+          </button>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>اليوم النشط 📅:</span>
+            <input
+              type="date"
+              className="form-input"
+              value={simDateInput}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSimDateInput(val);
+                navigateToDate(val);
+              }}
+              style={{ width: '160px', height: '36px', fontSize: 13, padding: '4px 10px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }}
+            />
+          </div>
+
+          <button 
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigateToDate(nextDateStr)}
+            style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', color: '#ffffff', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            التالي ➡️
+          </button>
         </div>
       </div>
 
-      {/* 2. Three Main KPI Cards */}
+      {/* Today's Active Stats Grid */}
+      <div 
+        style={{
+          background: 'rgba(30, 41, 59, 0.4)',
+          border: '1px solid rgba(255, 255, 255, 0.03)',
+          borderRadius: 16,
+          padding: 20,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-brand-light)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>📅</span> إحصائيات اليوم النشط ({currentActiveDate.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })})
+          </h3>
+          <button 
+            className="btn btn-danger btn-sm" 
+            onClick={() => {
+              if(confirm('هل تريد إغلاق اليوم الحالي والبدء في يوم جديد؟ سيتم الانتقال لليوم التالي وتصفير عداد اليوم.')) {
+                navigateToDate(nextDateStr);
+              }
+            }}
+            style={{ fontSize: 12, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+          >
+            إغلاق اليوم الحالي 🔒
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+          {/* Income today */}
+          <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.1)', borderRadius: 12, padding: 16 }}>
+            <span style={{ fontSize: 12, color: 'var(--color-income)', fontWeight: 600 }}>إيداعات اليوم 📥</span>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#ffffff', marginTop: 6 }}>
+              {formatCurrency(stats.todayIncome ?? 0)}
+            </div>
+          </div>
+
+          {/* Expenses today */}
+          <div style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.1)', borderRadius: 12, padding: 16 }}>
+            <span style={{ fontSize: 12, color: 'var(--color-expense)', fontWeight: 600 }}>مصروفات اليوم 📤</span>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#ffffff', marginTop: 6 }}>
+              {formatCurrency(stats.todayExpenses ?? 0)}
+            </div>
+          </div>
+
+          {/* Net today */}
+          <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 12, padding: 16 }}>
+            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', fontWeight: 600 }}>صافي حركة اليوم ⚖️</span>
+            <div style={{ fontSize: 22, fontWeight: 800, color: (stats.todayNet ?? 0) >= 0 ? 'var(--color-income)' : 'var(--color-expense)', marginTop: 6 }}>
+              {(stats.todayNet ?? 0) >= 0 ? '+' : ''}{formatCurrency(stats.todayNet ?? 0)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Four KPI Cards */}
       <div 
         style={{ 
           display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', 
           gap: 20 
         }}
       >
@@ -154,7 +292,7 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-            <span style={{ fontSize: 13, color: 'var(--color-brand-light)', fontWeight: 600 }}>🏦 رصيد البنك الحالي</span>
+            <span style={{ fontSize: 13, color: 'var(--color-brand-light)', fontWeight: 600 }}>🏦 رصيد البنك الفعلي</span>
             <button 
               className="btn btn-ghost btn-sm" 
               onClick={() => {
@@ -178,6 +316,14 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
                 <span style={{ color: stats.bankCycleChange >= 0 ? 'var(--color-income)' : 'var(--color-expense)', fontWeight: 'bold' }}>
                   {stats.bankCycleChange >= 0 ? '+' : ''}{formatPercentage(stats.bankCycleChangePct)}
                 </span>
+              </div>
+              
+              {/* Notice under bank balance */}
+              <div style={{ marginTop: 12, fontSize: 11, color: stats.remainingCommitments > 0 ? 'var(--color-warning)' : 'var(--color-income)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 8 }}>
+                {stats.remainingCommitments > 0 
+                  ? `⏳ متبقي التزامات للدفع بقيمة ${formatCurrency(stats.remainingCommitments)}`
+                  : '✅ تم دفع جميع الالتزامات لهذه الدورة'
+                }
               </div>
             </div>
           ) : (
@@ -216,17 +362,31 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
           </div>
         </div>
 
-        {/* Card 3: Deductions */}
+        {/* Card 3: Commitments */}
         <div className="card" style={{ background: 'linear-gradient(135deg, #2a1b1b, #1a0f0f)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-            <span style={{ fontSize: 13, color: 'var(--color-expense)', fontWeight: 600 }}>📉 الاستقطاعات التلقائية</span>
+            <span style={{ fontSize: 13, color: 'var(--color-expense)', fontWeight: 600 }}>📉 الالتزامات المتبقية</span>
             <span style={{ fontSize: 18 }}>💸</span>
           </div>
           <div style={{ fontSize: 30, fontWeight: 800, color: '#ffffff' }}>
-            {formatCurrency(stats.commitmentsTotal)}
+            {formatCurrency(stats.remainingCommitments)}
           </div>
           <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 10 }}>
-            إجمالي الالتزامات المطلوب خصمها
+            إجمالي الالتزامات المتبقية للدفع ({formatCurrency(stats.commitmentsTotal)} الكلية)
+          </div>
+        </div>
+
+        {/* Card 4: Digi Whale Net Profit */}
+        <div className="card" style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: '#a5b4fc', fontWeight: 600 }}>🐳 صافي ربح Digi Whale</span>
+            <span style={{ fontSize: 18 }}>💼</span>
+          </div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: '#ffffff' }}>
+            {formatCurrency(stats.digiWhaleNet)}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 10 }}>
+            صافي أرباح مشاريع ديجي ويل للدورة
           </div>
         </div>
       </div>
@@ -242,7 +402,7 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-heading)', margin: 0 }}>
-            ⚖️ صافي الدخل المتبقي بعد الالتزامات
+            ⚖️ صافي الدخل المتوقع المتبقي بعد الالتزامات
           </h3>
           <span 
             style={{
@@ -261,15 +421,15 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
         <div style={{ fontSize: 32, fontWeight: 900, color: stats.netProfitAfterDeductions >= 0 ? 'var(--color-income)' : 'var(--color-expense)' }}>
           {stats.netProfitAfterDeductions >= 0 ? '+' : ''}{formatCurrency(stats.netProfitAfterDeductions)}
         </div>
-        <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 8 }}>
-          حاصل طرح جميع الالتزامات الشهرية من إجمالي الدخل المضاف.
+        <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 8, margin: 0 }}>
+          حاصل طرح الالتزامات الشهرية المتبقية من إجمالي الدخل المضاف للدورة.
         </p>
       </div>
 
       {/* 4. Active Commitments Management */}
       <div className="card">
         <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: 'var(--color-text-heading)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>📋</span> الالتزامات الشهرية النشطة
+          <span>📋</span> الالتزامات المالية
         </h3>
         
         {/* Table of active commitments */}
@@ -279,14 +439,15 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
               <tr style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
                 <th style={{ padding: '12px' }}>اسم الالتزام</th>
                 <th style={{ padding: '12px' }}>المبلغ</th>
-                <th style={{ padding: '12px' }}>الحالة الحالية</th>
+                <th style={{ padding: '12px' }}>الحالة</th>
+                <th style={{ padding: '12px', textAlign: 'center' }}>الدفع اليدوي</th>
                 <th style={{ padding: '12px', width: '80px', textAlign: 'center' }}>إجراءات</th>
               </tr>
             </thead>
             <tbody>
               {commitments.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '24px' }}>
+                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: '24px' }}>
                     لا يوجد التزامات مسجلة حالياً. أضف التزاماً جديداً بالأسفل.
                   </td>
                 </tr>
@@ -300,11 +461,32 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
                         style={{ 
                           fontSize: '12px', 
                           fontWeight: 'bold',
-                          color: stats.deductionsApplied ? 'var(--color-income)' : 'var(--color-warning)' 
+                          color: c.status === 'paid' ? 'var(--color-income)' : 'var(--color-warning)' 
                         }}
                       >
-                        {stats.deductionsApplied ? 'تم الخصم تلقائياً ✅' : 'بانتظار الخصم يوم 5 ⏳'}
+                        {c.status === 'paid' ? 'مدفوع ✅' : 'معلق ⏳'}
                       </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {c.status === 'paid' ? (
+                        <button 
+                          onClick={() => handleUnpayCommitment(c.id)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '4px 10px', fontSize: 12, background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                          disabled={isPending}
+                        >
+                          إلغاء الدفع 🔄
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => handlePayCommitment(c.id)}
+                          className="btn btn-primary btn-sm"
+                          style={{ padding: '4px 10px', fontSize: 12, background: 'var(--color-income-muted)', color: 'var(--color-income)', border: '1px solid var(--color-income)' }}
+                          disabled={isPending}
+                        >
+                          دفع الالتزام 💸
+                        </button>
+                      )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <button 
@@ -386,6 +568,37 @@ export default function DashboardClient({ stats, commitments, currentMonthName }
             {stats.smartOpinion}
           </p>
         </div>
+      </div>
+
+      {/* 6. Settings / Danger Zone */}
+      <div 
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '16px 20px',
+          background: 'rgba(239, 68, 68, 0.02)',
+          borderRadius: 16,
+          border: '1px solid rgba(239, 68, 68, 0.1)',
+          marginTop: 8
+        }}
+      >
+        <div>
+          <h4 style={{ fontSize: 13, fontWeight: 700, color: '#ef4444', margin: 0 }}>
+            المنطقة الخطرة ⚠️
+          </h4>
+          <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4, margin: 0 }}>
+            حذف كافة المعاملات، الالتزامات، المشاريع، وإعادة تهيئة رصيد البنك من الصفر.
+          </p>
+        </div>
+        <button 
+          onClick={handleResetAllData}
+          className="btn btn-danger"
+          style={{ padding: '8px 16px', fontSize: 12, fontWeight: 'bold' }}
+          disabled={isPending}
+        >
+          تصفير البيانات بالكامل 🧹
+        </button>
       </div>
 
     </div>
